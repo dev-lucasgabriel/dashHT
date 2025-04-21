@@ -31,10 +31,23 @@ def carregar_dados():
 
 dados = carregar_dados()
 
+# Cálculo da conformidade por empresa
+status_cols = ["Recibo", "Remuneracao", "DCTF", "INSS"]
+
+def calcular_conformidade(df):
+    def porcentagem_ok(linha):
+        total = len(status_cols)
+        ok = sum([1 for col in status_cols if str(linha[col]).strip().upper() == "OK"])
+        return round((ok / total) * 100, 2)
+    df["%OK"] = df.apply(porcentagem_ok, axis=1)
+    return df
+
+dados = calcular_conformidade(dados)
+
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.FLATLY])
 
 app.layout = dbc.Container([
-    html.H2("Status Geral de Entregas por Empresa", style={"textAlign": "center", "marginTop": "20px"}),
+    html.H2("Dashboard de Conformidade das Empresas", style={"textAlign": "center", "marginTop": "20px"}),
 
     dbc.Row([
         dbc.Col([
@@ -61,7 +74,7 @@ app.layout = dbc.Container([
         dbc.Col([
             dash_table.DataTable(
                 id='tabela-status',
-                columns=[{"name": col, "id": col} for col in ["Empresa", "Recibo", "Remuneracao", "DCTF", "INSS"]],
+                columns=[{"name": col, "id": col} for col in ["Empresa", "Recibo", "Remuneracao", "DCTF", "INSS", "%OK"]],
                 style_cell={'textAlign': 'left', 'padding': '5px', 'color': 'black', 'backgroundColor': 'white'},
                 style_header={'backgroundColor': 'white', 'fontWeight': 'bold'},
                 style_table={'overflowX': 'auto'},
@@ -72,7 +85,19 @@ app.layout = dbc.Container([
 
     dbc.Row([
         dbc.Col([
-            dcc.Graph(id="grafico-porcentagem")
+            html.H5("Empresas com Pendências"),
+            dash_table.DataTable(
+                id='empresas-incompletas',
+                columns=[
+                    {"name": "Empresa", "id": "Empresa"},
+                    {"name": "%OK", "id": "%OK"}
+                ],
+                data=[],
+                style_cell={'textAlign': 'left', 'color': 'black', 'backgroundColor': 'white'},
+                style_header={'backgroundColor': 'white', 'fontWeight': 'bold'},
+                style_table={'overflowX': 'auto'},
+                page_size=10
+            )
         ])
     ])
 ])
@@ -89,34 +114,20 @@ def atualiza_empresas(mes):
 
 @app.callback(
     Output("tabela-status", "data"),
-    Output("grafico-porcentagem", "figure"),
+    Output("empresas-incompletas", "data"),
     Input("filtro-mes", "value"),
     Input("filtro-empresa", "value")
 )
-def atualiza_tabela_e_grafico(mes, empresa):
-    df_filtrado = dados[(dados["Mês"] == mes)]
+def atualizar_tabelas(mes, empresa):
+    df_mes = dados[dados["Mês"] == mes]
     if empresa:
-        df_filtrado = df_filtrado[df_filtrado["Empresa"] == empresa]
+        df_emp = df_mes[df_mes["Empresa"] == empresa]
     else:
-        return [], go.Figure()
+        df_emp = pd.DataFrame()
 
-    status_cols = ["Recibo", "Remuneracao", "DCTF", "INSS"]
-    total_campos = len(status_cols)
-    linha = df_filtrado.iloc[0]
-    total_ok = sum([1 for col in status_cols if str(linha[col]).strip().upper() == "OK"])
-    porcentagem = round((total_ok / total_campos) * 100, 2)
+    empresas_incompletas = df_mes[df_mes["%OK"] < 100][["Empresa", "%OK"]].drop_duplicates()
 
-    fig = go.Figure(data=[
-        go.Pie(
-            labels=["OK", "Pendente"],
-            values=[porcentagem, 100 - porcentagem],
-            hole=0.5,
-            marker_colors=["green", "red"]
-        )
-    ])
-    fig.update_layout(title=f"Conformidade Geral da Empresa ({porcentagem}%)", template="plotly_white")
-
-    return df_filtrado.to_dict("records"), fig
+    return df_emp.to_dict("records"), empresas_incompletas.to_dict("records")
 
 if __name__ == '__main__':
     app.run(debug=True, port=8050, host='0.0.0.0')
